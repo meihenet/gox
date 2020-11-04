@@ -1,20 +1,137 @@
-package mysql
+package db
 
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
+	"sync"
+	"time"
+
+	_ "github.com/go-sql-driver/mysql"
 )
 
-// data struct for sql values or conditions
-type SqlMap map[string]interface{}
-
-type typer interface {
-	Execute(string, ...[]interface{}) (sql.Result, error)
-	Query(string, ...interface{}) (*sql.Rows, error)
-	QueryRow(string, ...interface{}) *sql.Row
+// the normal class for connect to mysql server
+type Mysql struct {
+	mysqlx
+	conn *sql.DB
+	// the max connection life time
+	connMaxLiftTime time.Duration
+	// the max idle connections
+	maxIdleConns int
 }
 
+type mysqlOptions func(*Mysql)
+
+// Get a mysql client object
+var client *Mysql
+var once sync.Once
+
+func NewMysql(dsn string, opts ...mysqlOptions) (*Mysql, error) {
+	var err error = nil
+	once.Do(func() {
+		client = &Mysql{}
+		client.typer = client
+		client.prefix = ""
+		client.connMaxLiftTime = 100
+		client.maxIdleConns = 10
+		for _, opt := range opts {
+			opt(client)
+		}
+		err = client.connect(dsn)
+	})
+	return client, err
+}
+
+func WithMysqlPrefix(prefix string) mysqlOptions {
+	return func(mysql *Mysql) {
+		mysql.prefix = prefix
+	}
+}
+
+func WithMysqlConnMaxLiftTime(connMaxLiftTime time.Duration) mysqlOptions {
+	return func(mysql *Mysql) {
+		mysql.connMaxLiftTime = connMaxLiftTime
+	}
+}
+
+func WithMysqlMaxIdleConns(maxIdleConns int) mysqlOptions {
+	return func(mysql *Mysql) {
+		mysql.maxIdleConns = maxIdleConns
+	}
+}
+
+// try to connect to the DB host
+// @DNS:  <user>:<pass>@tcp(<host>:<port>)/<dbName>?charset=<charset>
+func (this *Mysql) connect(dsn string) error {
+	conn, err := sql.Open("mysql", dsn)
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	// Set the max connections
+	conn.SetConnMaxLifetime(this.connMaxLiftTime)
+	// Set the max idle connections
+	conn.SetMaxIdleConns(this.maxIdleConns)
+	// Double check the db connection works
+	if err := conn.Ping(); err != nil {
+		log.Fatal(err)
+		return err
+	}
+	this.conn = conn
+	return nil
+}
+
+func (this *Mysql) Execute(sql string, params ...[]interface{}) (sql.Result, error) {
+	stmt, err := this.conn.Prepare(sql)
+	if err != nil {
+		return nil, err
+	}
+
+	var args []interface{}
+	if len(params) > 0 {
+		args = params[0]
+	}
+
+	res, err := stmt.Exec(args...)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (this *Mysql) Query(sql string, args ...interface{}) (*sql.Rows, error) {
+	return this.conn.Query(sql, args...)
+}
+
+func (this *Mysql) QueryRow(sql string, args ...interface{}) *sql.Row {
+	return this.conn.QueryRow(sql, args...)
+}
+
+// try to close the db connection and set to nil
+func (this *Mysql) Close() {
+	if this.conn != nil {
+		this.conn.Close()
+		this.conn = nil
+	}
+}
+
+// Create a new transaction object
+func (this *Mysql) StartTx() (*MysqlTx, error) {
+	tx, err := this.conn.Begin()
+	if err != nil {
+		return nil, err
+	}
+
+	mysqlTx := &MysqlTx{conn: tx}
+	mysqlTx.typer = mysqlTx
+	mysqlTx.mysqlx.prefix = this.mysqlx.prefix
+	return mysqlTx, nil
+}
+
+////////////////////////////////////////////////////////////////////////////
+/// class mysqlx
+////////////////////////////////////////////////////////////////////////////
 type mysqlx struct {
 	// db connection or transaction connection
 	typer
@@ -199,24 +316,6 @@ func (this *mysqlx) Delete(tableName string, wheres ...SqlMap) (int64, error) {
 	return affectRows, nil
 }
 
-// Self-add or Self-minus one field
-type sqlAddOrMinusOption struct {
-	wheres SqlMap
-	step   int
-}
-
-func (this *mysqlx) WithAddOrMinusWheres(wheres SqlMap) func(*sqlAddOrMinusOption) {
-	return func(opt *sqlAddOrMinusOption) {
-		opt.wheres = wheres
-	}
-}
-
-func (this *mysqlx) WithAddOrMinusStep(step int) func(*sqlAddOrMinusOption) {
-	return func(opt *sqlAddOrMinusOption) {
-		opt.step = step
-	}
-}
-
 func (this *mysqlx) Add(tableName string, column string, funcs ...func(*sqlAddOrMinusOption)) (int64, error) {
 	opt := &sqlAddOrMinusOption{wheres: nil, step: 1}
 
@@ -275,4 +374,46 @@ func (this *mysqlx) Minus(tableName string, column string, funcs ...func(*sqlAdd
 		return 0, err
 	}
 	return affectRows, nil
+}
+
+////////////////////////////////////////////////////////////////////////////
+/// class mysql tx
+////////////////////////////////////////////////////////////////////////////
+type MysqlTx struct {
+	mysqlx
+	conn *sql.Tx
+}
+
+func (this *MysqlTx) Execute(sql string, params ...[]interface{}) (sql.Result, error) {
+	stmt, err := this.conn.Prepare(sql)
+	if err != nil {
+		return nil, err
+	}
+
+	var args []interface{}
+	if len(params) > 0 {
+		args = params[0]
+	}
+
+	res, err := stmt.Exec(args...)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (this *MysqlTx) Query(sql string, args ...interface{}) (*sql.Rows, error) {
+	return this.conn.Query(sql, args...)
+}
+
+func (this *MysqlTx) QueryRow(sql string, args ...interface{}) *sql.Row {
+	return this.conn.QueryRow(sql, args...)
+}
+
+func (this *MysqlTx) Commit() error {
+	return this.conn.Commit()
+}
+
+func (this *MysqlTx) Rollback() error {
+	return this.conn.Rollback()
 }
