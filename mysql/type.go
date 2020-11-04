@@ -18,7 +18,7 @@ type mysqlx struct {
 	// db connection or transaction connection
 	typer
 	// the table prefix
-	tablePrefix
+	prefix
 }
 
 // Create the where SQL & Params from a Mapping data
@@ -35,7 +35,7 @@ func (this *mysqlx) getWhere(data SqlMap) (string, []interface{}) {
 		}
 	}
 	sql := ""
-	if len(whereFields) > 0 {
+	if len(fields) > 0 {
 		sql = strings.Join(fields, " AND ")
 	}
 	return sql, values
@@ -79,8 +79,8 @@ func (this *mysqlx) getValues(data SqlMap) (string, []interface{}) {
 // if the prefix is empty, return the table name directly
 // otherwise return the prefix_tablename
 func (this *mysqlx) TableName(name string) string {
-	if config.DBPrefix == "" {
+	if mysqlx.prefix == "" {
 		return name
 	}
-	return fmt.Sprintf("%s_%s", config.DBPrefix, name)
+	return fmt.Sprintf("%s_%s", mysqlx.prefix, name)
 }
