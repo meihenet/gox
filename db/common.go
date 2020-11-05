@@ -7,7 +7,7 @@ import (
 // data struct for sql values or conditions
 type SqlMap map[string]interface{}
 
-type typer interface {
+type sqlTyper interface {
 	Execute(string, ...[]interface{}) (sql.Result, error)
 	Query(string, ...interface{}) (*sql.Rows, error)
 	QueryRow(string, ...interface{}) *sql.Row
