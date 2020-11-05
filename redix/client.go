@@ -1,4 +1,4 @@
-package redis
+package redix
 
 import (
 	"context"
@@ -7,9 +7,6 @@ import (
 
 	goredis "github.com/go-redis/redis/v8"
 )
-
-var client *RedisClient
-var once sync.Once
 
 type RedisClient struct {
 	client *goredis.Client
@@ -23,6 +20,9 @@ func WithContext(ctx context.Context) redisOption {
 		rc.ctx = ctx
 	}
 }
+
+var client *RedisClient
+var once sync.Once
 
 func New(url string, opts ...redisOption) (*RedisClient, error) {
 	var err error = nil
@@ -47,10 +47,19 @@ func (this *RedisClient) connect(url string) error {
 	return nil
 }
 
-func (this *RedisClient) Set(key string, value interface{}, expiration time.Duration) error {
+// Set the value for key
+// @key - string
+// @value - interface{}
+// @seconds - the seconds of expiration (optional, by default it wont be expired forever)
+func (this *RedisClient) Set(key string, value interface{}, seconds ...int) error {
+	expiration := time.Duration(0) * time.Second
+	if len(seconds) > 0 {
+		expiration = time.Duration(seconds[0]) * time.Second
+	}
 	return this.client.Set(this.ctx, key, value, expiration).Err()
 }
 
+// Get the value by key
 func (this *RedisClient) Get(key string) (interface{}, error) {
 	return this.client.Get(this.ctx, key).Result()
 }
