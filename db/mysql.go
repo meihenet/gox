@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -21,41 +20,35 @@ type Mysql struct {
 	maxIdleConns int
 }
 
-type mysqlOptions func(*Mysql)
+type mysqlOption func(*Mysql)
 
 // Get a mysql client object
-var client *Mysql
-var once sync.Once
-
-func NewMysql(dsn string, opts ...mysqlOptions) (*Mysql, error) {
-	var err error = nil
-	once.Do(func() {
-		client = &Mysql{}
-		client.sqlTyper = client
-		client.prefix = ""
-		client.connMaxLiftTime = 100
-		client.maxIdleConns = 10
-		for _, opt := range opts {
-			opt(client)
-		}
-		err = client.connect(dsn)
-	})
+func NewMysql(dsn string, opts ...mysqlOption) (*Mysql, error) {
+	client := &Mysql{}
+	client.sqlTyper = client
+	client.prefix = ""
+	client.connMaxLiftTime = 100
+	client.maxIdleConns = 10
+	for _, fun := range opts {
+		fun(client)
+	}
+	err := client.connect(dsn)
 	return client, err
 }
 
-func WithMysqlPrefix(prefix string) mysqlOptions {
+func WithMysqlPrefix(prefix string) mysqlOption {
 	return func(mysql *Mysql) {
 		mysql.prefix = prefix
 	}
 }
 
-func WithMysqlConnMaxLiftTime(connMaxLiftTime time.Duration) mysqlOptions {
+func WithMysqlConnMaxLiftTime(connMaxLiftTime time.Duration) mysqlOption {
 	return func(mysql *Mysql) {
 		mysql.connMaxLiftTime = connMaxLiftTime
 	}
 }
 
-func WithMysqlMaxIdleConns(maxIdleConns int) mysqlOptions {
+func WithMysqlMaxIdleConns(maxIdleConns int) mysqlOption {
 	return func(mysql *Mysql) {
 		mysql.maxIdleConns = maxIdleConns
 	}
